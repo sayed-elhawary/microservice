@@ -47,7 +47,7 @@ const Login = () => {
 
         <form onSubmit={handleSubmit} className="login-form">
           <div className="input-group">
-            <label htmlFor="email"> البريد الإلكتروني الخاص بك  </label>
+            <label htmlFor="email"> البريد الإلكتروني   </label>
             <input
               id="email"
               type="email"
