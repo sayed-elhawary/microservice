@@ -7,14 +7,14 @@ pipeline {
     }
 
     options {
-        timeout(time: 45, unit: 'MINUTES')          // timeout عام لكل البناء
-        timestamps()                                // إضافة توقيت لكل سطر في الـ log
-        buildDiscarder(logRotator(numToKeepStr: '10'))  // احتفظ بآخر 10 بناءات بس
+        timeout(time: 45, unit: 'MINUTES')          // إجمالي timeout لكل البناء
+        timestamps()                                // إضافة توقيت بجانب كل سطر في الـ log
+        buildDiscarder(logRotator(numToKeepStr: '10')) // احتفظ بآخر 10 بناءات فقط
     }
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد من الـ ID ده في Credentials
+        DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد إن الـ ID ده موجود بالظبط في Credentials
     }
 
     stages {
@@ -72,8 +72,8 @@ pipeline {
             steps {
                 echo "فحص بسيط للخدمات..."
                 sh """
-                    sleep 10  # انتظر شوية عشان الخدمات تبدأ
-                    curl -s -f http://localhost:3000 || echo "Frontend لسه مش جاهز"
+                    sleep 10                 # انتظر شوية عشان الخدمات تبدأ
+                    curl -s -f http://localhost:3000      || echo "Frontend لسه مش جاهز"
                     curl -s -f http://localhost:3001/health || echo "Auth service check failed"
                 """
             }
@@ -89,7 +89,7 @@ pipeline {
                 docker image prune -f || true
             '''
 
-            // لو عايز تحتفظ بملفات مهمة
+            // حفظ ملف docker-compose.yaml مع كل بناء (اختياري لكن مفيد للرجوع)
             archiveArtifacts artifacts: 'docker-compose.yaml', allowEmptyArchive: true
         }
 
