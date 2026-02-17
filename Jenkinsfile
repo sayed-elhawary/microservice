@@ -2,20 +2,20 @@ pipeline {
     agent any
 
     triggers {
-        githubPush()                    // يشتغل فورًا عند أي push عبر webhook
-        pollSCM('H/5 * * * *')          // احتياطي كل ~5 دقايق
+        githubPush()                    // يشتغل تلقائي فورًا عند أي push على GitHub
+        pollSCM('H/5 * * * *')          // احتياطي كل ~5 دقايق لو الـ webhook ما اشتغلش
     }
 
     options {
-        timeout(time: 45, unit: 'MINUTES')          // إجمالي timeout لكل البناء
-        timestamps()                                // إضافة توقيت بجانب كل سطر في الـ log
-        buildDiscarder(logRotator(numToKeepStr: '10')) // احتفظ بآخر 10 بناءات فقط
+        timeout(time: 45, unit: 'MINUTES')          // كل البناء ما يطولش أكتر من 45 دقيقة
+        timestamps()                                // إضافة توقيت دقيق لكل سطر في الـ log
+        buildDiscarder(logRotator(numToKeepStr: '10')) // احتفظ بآخر 10 بناءات فقط عشان المساحة
     }
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد إن الـ ID ده موجود بالظبط في Credentials
-        IMAGE_TAG           = "${env.BUILD_NUMBER}"      // اختياري: استخدم رقم البناء بدل latest
+        DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد إن الـ ID ده مطابق تمامًا في Credentials
+        IMAGE_TAG           = "${env.BUILD_NUMBER}"      // اختياري: استخدم رقم البناء بدل latest (أفضل للتراجع)
     }
 
     stages {
@@ -23,7 +23,7 @@ pipeline {
             steps {
                 checkout scm
                 echo "━━━━━━━━━━━━━━━━━━ تم جلب الكود من GitHub ━━━━━━━━━━━━━━━━━━"
-                sh 'git rev-parse --short HEAD > .git/commit-id'  // حفظ commit hash لو عايز تستخدمه
+                sh 'git rev-parse --short HEAD > .git/commit-id'  // حفظ commit hash لو عايز تستخدمه في التاج
             }
         }
 
@@ -32,6 +32,8 @@ pipeline {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', env.DOCKERHUB_CRED) {
                         echo "✅ تم تسجيل الدخول بنجاح إلى Docker Hub"
+                        // اختياري: اطبع معلومات الـ auth عشان نتأكد
+                        sh 'docker info --format "{{json .RegistryConfig.IndexConfigs.docker.io}}"'
                     }
                 }
             }
@@ -50,7 +52,7 @@ pipeline {
         stage('Deploy - Pull & Restart') {
             steps {
                 echo "جاري سحب أحدث الصور وإعادة تشغيل الخدمات..."
-                retry(3) {  // retry 3 مرات لو فشل مؤقت
+                retry(3) {  // حاول 3 مرات لو حصل فشل مؤقت (مفيد جدًا)
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                             docker compose -f ${DOCKER_COMPOSE_FILE} pull
@@ -74,12 +76,12 @@ pipeline {
 
         stage('Basic Health Check') {
             steps {
-                echo "فحص بسيط للخدمات..."
+                echo "فحص بسيط للخدمات (بعد 15 ثانية)..."
                 sh """
-                    sleep 15                 # انتظر أكتر شوية عشان الخدمات تبدأ
+                    sleep 15
                     curl -s -f http://localhost:3000      || echo "Frontend لسه مش جاهز"
                     curl -s -f http://localhost:3001/health || echo "Auth service check failed"
-                    # أضف المزيد لو عندك endpoints تانية
+                    # أضف هنا أي endpoints تانية لو عندك (مثل product أو display)
                 """
             }
         }
@@ -97,7 +99,7 @@ pipeline {
             // حفظ ملف docker-compose.yaml مع كل بناء
             archiveArtifacts artifacts: 'docker-compose.yaml', allowEmptyArchive: true
 
-            // اختياري: حفظ logs الخدمات لو فشل
+            // حفظ logs الخدمات لو فشل أو unstable (مفيد جدًا للتصليح)
             script {
                 if (currentBuild.currentResult == 'FAILURE' || currentBuild.currentResult == 'UNSTABLE') {
                     sh 'docker compose -f ${DOCKER_COMPOSE_FILE} logs > deployment-logs.txt || true'
@@ -108,6 +110,7 @@ pipeline {
 
         success {
             echo '🎉 تم البناء والرفع والنشر بنجاح كامل!'
+            // لو عندك Slack أو Discord، شيل التعليق ده وعدله:
             // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} succeeded! 🚀"
         }
 
