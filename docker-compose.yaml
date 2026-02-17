@@ -1,48 +1,60 @@
-version: '3.8'
-
 services:
   mongo:
-    image: mongo:latest
+    image: mongo:latest  # ← حدثت لأحدث إصدار مستقر (بدل latest عشان الاستقرار في الـ CI/CD)
+    restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   auth-service:
-    image: elhawary22/auth-service:latest          # ← أضف سطر image ده
+    image: elhawary22/auth-service:${IMAGE_TAG:-latest}
     build: ./auth-service
+    restart: unless-stopped
     ports:
       - "3001:3001"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     environment:
       - MONGO_URI=mongodb://mongo:27017/ecommerce_db
 
   product-service:
-    image: elhawary22/product-service:latest       # ← أضف
+    image: elhawary22/product-service:${IMAGE_TAG:-latest}
     build: ./product-service
+    restart: unless-stopped
     ports:
       - "3002:3002"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     environment:
       - MONGO_URI=mongodb://mongo:27017/ecommerce_db
     volumes:
       - ./product-service/uploads:/app/uploads
 
   display-service:
-    image: elhawary22/display-service:latest       # ← أضف
+    image: elhawary22/display-service:${IMAGE_TAG:-latest}
     build: ./display-service
+    restart: unless-stopped
     ports:
       - "3003:3003"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     environment:
       - MONGO_URI=mongodb://mongo:27017/ecommerce_db
 
   frontend:
-    image: elhawary22/frontend:latest              # ← أضف
+    image: elhawary22/frontend:${IMAGE_TAG:-latest}
     build: ./frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     depends_on:
