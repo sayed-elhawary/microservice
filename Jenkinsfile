@@ -1,75 +1,56 @@
 pipeline {
     agent any
 
-    // ────────────────────────────────────────────────
-    // Triggers: webhook + polling كل 5 دقايق كاحتياطي
-    // ────────────────────────────────────────────────
     triggers {
-        // GitHub webhook (لازم تفعّل الـ GitHub hook في إعدادات الـ job)
         githubPush()
-        
-        // polling كاحتياطي لو الـ webhook ما وصلش
-        pollSCM('H/5 * * * *')   // كل 5 دقايق (H = hash لتوزيع الحمل)
+        pollSCM('H/5 * * * *')
     }
 
     environment {
-        // المسارات اللي هنستخدمها
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        
-        // لو عندك أكتر من compose file ممكن تضيف
-        // COMPOSE_PROJECT_NAME = "microservice"
-    }
-
-    options {
-        // متعملش build لو فيه بناء شغال حاليًا على نفس الـ branch
-        disableConcurrentBuilds()
-        
-        // احتفظ بآخر 10 بناءات بس عشان المساحة
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        
-        // timeout لو البناء طول أوي
-        timeout(time: 30, unit: 'MINUTES')
+        DOCKERHUB_CRED = 'docker-hub-credentials'   // ← غيّر لو الـ ID مختلف
     }
 
     stages {
         stage('Checkout') {
             steps {
-                echo "━━━━━━━━━━━━━━━━━━ Cloning Repository ━━━━━━━━━━━━━━━━━━"
-                checkout scm   // ← ده الأفضل لما تستخدم Pipeline from SCM
-                // لو عايز تكتبه يدوي (مش مستحسن هنا):
-                // git branch: 'main', url: 'https://github.com/sayed-elhawary/microservice.git'
+                checkout scm
             }
         }
 
-        stage('Verify docker-compose file') {
+        stage('Login to Docker Hub') {
             steps {
-                sh "ls -la ${DOCKER_COMPOSE_FILE} || echo 'docker-compose.yaml not found!'"
-                sh "cat ${DOCKER_COMPOSE_FILE} | head -n 15"   // عشان نشوف أول جزء
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKERHUB_CRED,
+                    usernameVariable: 'selhawary2025@gmail.com',
+                    passwordVariable: 'hH01230123'
+                )]) {
+                    sh 'echo $DH_PASS | docker login -u $DH_USER --password-stdin'
+                }
             }
         }
 
-        stage('Stop previous containers') {
+        stage('Build & Push Images') {
             steps {
-                echo "Stopping any old containers..."
                 sh """
-                    docker compose -f ${DOCKER_COMPOSE_FILE} down --remove-orphans || true
+                    docker compose -f ${DOCKER_COMPOSE_FILE} build
+                    docker compose -f ${DOCKER_COMPOSE_FILE} push
                 """
             }
         }
 
-        stage('Build & Start Services') {
+        stage('Deploy - Pull & Restart') {
             steps {
-                echo "Building and starting services..."
+                echo "Pulling latest images and redeploying..."
                 sh """
-                    docker compose -f ${DOCKER_COMPOSE_FILE} build --no-cache
-                    docker compose -f ${DOCKER_COMPOSE_FILE} up -d --force-recreate --remove-orphans
+                    docker compose -f ${DOCKER_COMPOSE_FILE} pull
+                    docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate
                 """
             }
         }
 
-        stage('Check running services') {
+        stage('Verify') {
             steps {
-                echo "Checking container status..."
                 sh "docker compose -f ${DOCKER_COMPOSE_FILE} ps"
             }
         }
@@ -77,23 +58,14 @@ pipeline {
 
     post {
         always {
-            echo "━━━━━━━━━━━━━━━━━━ Pipeline finished ━━━━━━━━━━━━━━━━━━"
-            // لو عايز logs أو تنظيف
+            sh 'docker logout || true'
             sh 'docker system prune -f || true'
         }
-
         success {
-            echo '🎉 Deployment Successful!'
-            // ممكن تضيف إشعار (email/slack/discord) هنا لاحقًا
+            echo '✅ Build, Push & Deploy Done!'
         }
-
         failure {
-            echo '❌ Something went wrong!'
-            // ممكن ترسل إشعار بالفشل
-        }
-
-        unstable {
-            echo '⚠️ Pipeline is unstable'
+            echo '❌ Failed somewhere'
         }
     }
 }
