@@ -1,4 +1,5 @@
-version: '3'
+version: '3.8'
+
 services:
   mongo:
     image: mongo:latest
@@ -8,6 +9,7 @@ services:
       - mongo-data:/data/db
 
   auth-service:
+    image: elhawary22/auth-service:latest          # ← أضف سطر image ده
     build: ./auth-service
     ports:
       - "3001:3001"
@@ -17,6 +19,7 @@ services:
       - MONGO_URI=mongodb://mongo:27017/ecommerce_db
 
   product-service:
+    image: elhawary22/product-service:latest       # ← أضف
     build: ./product-service
     ports:
       - "3002:3002"
@@ -28,6 +31,7 @@ services:
       - ./product-service/uploads:/app/uploads
 
   display-service:
+    image: elhawary22/display-service:latest       # ← أضف
     build: ./display-service
     ports:
       - "3003:3003"
@@ -37,6 +41,7 @@ services:
       - MONGO_URI=mongodb://mongo:27017/ecommerce_db
 
   frontend:
+    image: elhawary22/frontend:latest              # ← أضف
     build: ./frontend
     ports:
       - "3000:3000"
