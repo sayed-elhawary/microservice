@@ -2,20 +2,22 @@ pipeline {
     agent any
 
     triggers {
-        githubPush()                    // يشتغل تلقائي فورًا عند أي push على GitHub
-        pollSCM('H/5 * * * *')          // احتياطي كل ~5 دقايق لو الـ webhook ما اشتغلش
+        githubPush()
+        pollSCM('H/5 * * * *')
     }
 
     options {
-        timeout(time: 45, unit: 'MINUTES')          // كل البناء ما يطولش أكتر من 45 دقيقة
-        timestamps()                                // إضافة توقيت دقيق لكل سطر في الـ log
-        buildDiscarder(logRotator(numToKeepStr: '10')) // احتفظ بآخر 10 بناءات فقط عشان المساحة
+        timeout(time: 45, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5'))
+        disableConcurrentBuilds()  // جلوگیری از تداخل اگر چند push همزمان بیاد
     }
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد إن الـ ID ده مطابق تمامًا في Credentials
-        IMAGE_TAG           = "${env.BUILD_NUMBER}"      // اختياري: استخدم رقم البناء بدل latest (أفضل للتراجع)
+        DOCKERHUB_CRED      = 'docker-hub-credentials'  // حتماً مطمئن شو که این ID در Jenkins درست باشه
+        IMAGE_TAG           = "${env.BUILD_NUMBER}"     // یا "${sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()}"
+        DOCKERHUB_USERNAME  = 'elhawary22'              // ← اسم کاربری خودت (ثابت)
     }
 
     stages {
@@ -23,40 +25,70 @@ pipeline {
             steps {
                 checkout scm
                 echo "━━━━━━━━━━━━━━━━━━ تم جلب الكود من GitHub ━━━━━━━━━━━━━━━━━━"
-                sh 'git rev-parse --short HEAD > .git/commit-id'  // حفظ commit hash لو عايز تستخدمه في التاج
+                sh 'git rev-parse --short HEAD > .git/commit-id'
             }
         }
 
         stage('Login to Docker Hub') {
             steps {
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', env.DOCKERHUB_CRED) {
-                        echo "✅ تم تسجيل الدخول بنجاح إلى Docker Hub"
-                        // اختياري: اطبع معلومات الـ auth عشان نتأكد
-                        sh 'docker info --format "{{json .RegistryConfig.IndexConfigs.docker.io}}"'
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKERHUB_CRED,
+                    usernameVariable: 'DH_USER',
+                    passwordVariable: 'DH_PASS'
+                )]) {
+                    sh '''
+                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                        echo "━━━━━━━━━━━━━━━━━━ تم تسجيل الدخول بنجاح إلى Docker Hub ━━━━━━━━━━━━━━━━━━"
+                        docker info --format '{{json .RegistryConfig.IndexConfigs.docker.io}}' | grep -i auth || echo "No auth info (normal if using token)"
+                    '''
+                }
+            }
+        }
+
+        stage('Build Images') {
+            steps {
+                echo "جاري بناء الصور بتاج ${IMAGE_TAG}..."
+                sh """
+                    docker compose -f ${DOCKER_COMPOSE_FILE} build --pull --no-cache
+                """
+            }
+        }
+
+        stage('Push Images to Docker Hub') {
+            steps {
+                echo "جاري رفع الصور إلى Docker Hub..."
+                withCredentials([usernamePassword(
+                    credentialsId: env.DOCKERHUB_CRED,
+                    usernameVariable: 'DH_USER',
+                    passwordVariable: 'DH_PASS'
+                )]) {
+                    script {
+                        // قائمة الخدمات التي تحتاج رفع (عدلها حسب docker-compose.yaml بتاعك)
+                        def services = ['frontend', 'product-service', 'display-service', 'auth-service']
+
+                        for (service in services) {
+                            def fullImage = "${env.DOCKERHUB_USERNAME}/${service}:${env.IMAGE_TAG}"
+                            sh """
+                                docker tag ${service}:${env.IMAGE_TAG} ${fullImage}
+                                echo "${DH_PASS}" | docker login -u "${DH_USER}" --password-stdin
+                                docker push ${fullImage}
+                                echo "تم رفع ${fullImage} بنجاح"
+                            """
+                        }
                     }
                 }
             }
         }
 
-        stage('Build & Push Images') {
-            steps {
-                echo "جاري بناء ورفع الصور بتاج ${IMAGE_TAG}..."
-                sh """
-                    docker compose -f ${DOCKER_COMPOSE_FILE} build --pull
-                    docker compose -f ${DOCKER_COMPOSE_FILE} push
-                """
-            }
-        }
-
         stage('Deploy - Pull & Restart') {
+            when { expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' } }
             steps {
-                echo "جاري سحب أحدث الصور وإعادة تشغيل الخدمات..."
-                retry(3) {  // حاول 3 مرات لو حصل فشل مؤقت (مفيد جدًا)
+                echo "جاري سحب الصور الجديدة وإعادة تشغيل الخدمات..."
+                retry(3) {
                     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
                         sh """
                             docker compose -f ${DOCKER_COMPOSE_FILE} pull
-                            docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate
+                            docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate --no-deps
                         """
                     }
                 }
@@ -65,24 +97,26 @@ pipeline {
 
         stage('Verify Services') {
             steps {
-                echo "التحقق من حالة الخدمات..."
                 sh """
-                    docker compose -f ${DOCKER_COMPOSE_FILE} ps
-                    echo "━━━━━━━━━━━━━━━━━━ الصور الموجودة المحلية ━━━━━━━━━━━━━━━━━━"
-                    docker images | grep elhawary22 || echo "لم يتم العثور على صور جديدة"
+                    docker compose -f ${DOCKER_COMPOSE_FILE} ps --format "table {{.Name}}\\t{{.State}}\\t{{.Status}}"
+                    echo "━━━━━━━━━━━━━━━━━━ الصور المحلية ━━━━━━━━━━━━━━━━━━"
+                    docker images | grep "${DOCKERHUB_USERNAME}" || echo "ما فيش صور جديدة"
                 """
             }
         }
 
         stage('Basic Health Check') {
             steps {
-                echo "فحص بسيط للخدمات (بعد 15 ثانية)..."
-                sh """
-                    sleep 15
-                    curl -s -f http://localhost:3000      || echo "Frontend لسه مش جاهز"
-                    curl -s -f http://localhost:3001/health || echo "Auth service check failed"
-                    # أضف هنا أي endpoints تانية لو عندك (مثل product أو display)
-                """
+                echo "فحص صحة الخدمات (بعد 20 ثانية)..."
+                sh '''
+                    sleep 20
+                    set +e
+                    curl --max-time 10 -s -f http://localhost:3000/       && echo "Frontend: OK"       || echo "Frontend: FAILED"
+                    curl --max-time 10 -s -f http://localhost:3001/health && echo "Auth: OK"          || echo "Auth: FAILED"
+                    # أضف باقي الخدمات هنا، مثلاً:
+                    # curl --max-time 10 -s -f http://localhost:3002/health || echo "Product: FAILED"
+                    set -e
+                '''
             }
         }
     }
@@ -92,36 +126,21 @@ pipeline {
             echo "━━━━━━━━━━━━━━━━━━ تنظيف بعد البناء ━━━━━━━━━━━━━━━━━━"
             sh '''
                 docker logout || true
-                docker system prune -f --volumes --filter "until=24h" || true
                 docker image prune -f || true
+                docker system prune -f --filter "until=24h" || true   # بدون --volumes هنا عشان ما يمسحش volumes مهمة
             '''
+            archiveArtifacts artifacts: 'docker-compose.yaml, deployment-logs.txt', allowEmptyArchive: true
 
-            // حفظ ملف docker-compose.yaml مع كل بناء
-            archiveArtifacts artifacts: 'docker-compose.yaml', allowEmptyArchive: true
-
-            // حفظ logs الخدمات لو فشل أو unstable (مفيد جدًا للتصليح)
             script {
-                if (currentBuild.currentResult == 'FAILURE' || currentBuild.currentResult == 'UNSTABLE') {
-                    sh 'docker compose -f ${DOCKER_COMPOSE_FILE} logs > deployment-logs.txt || true'
+                if (currentBuild.currentResult in ['FAILURE', 'UNSTABLE']) {
+                    sh 'docker compose -f ${DOCKER_COMPOSE_FILE} logs --no-color > deployment-logs.txt || true'
                     archiveArtifacts artifacts: 'deployment-logs.txt', allowEmptyArchive: true
                 }
             }
         }
 
-        success {
-            echo '🎉 تم البناء والرفع والنشر بنجاح كامل!'
-            // لو عندك Slack أو Discord، شيل التعليق ده وعدله:
-            // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} succeeded! 🚀"
-        }
-
-        unstable {
-            echo '⚠️ الـ Pipeline نجح جزئيًا (ربما مشكلة في الـ deploy أو الـ health check)'
-            // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} unstable! ⚠️ Check logs."
-        }
-
-        failure {
-            echo '❌ فشل الـ Pipeline – راجع السجلات أعلاه بعناية'
-            // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} FAILED! ❌ Check Jenkins."
-        }
+        success  { echo '🎉 تم البناء والرفع والنشر بنجاح كامل!' }
+        unstable { echo '⚠️ Pipeline نجح جزئياً – راجع الـ logs' }
+        failure  { echo '❌ فشل الـ Pipeline – شوف السجلات بعناية' }
     }
 }
