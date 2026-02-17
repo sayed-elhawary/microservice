@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     triggers {
-        githubPush()                    // webhook من GitHub
-        pollSCM('H/5 * * * *')          // احتياطي كل ~5 دقايق
+        githubPush()                    // يشتغل فوراً عند push عبر webhook
+        pollSCM('H/5 * * * *')          // احتياطي كل ~5 دقائق
     }
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED      = 'docker-hub-credentials'   // غيّر لو الـ ID مختلف
+        DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد من الـ ID في Credentials
     }
 
     stages {
@@ -25,7 +25,7 @@ pipeline {
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', env.DOCKERHUB_CRED) {
-                        echo "✅ Successfully authenticated with Docker Hub (credential: ${env.DOCKERHUB_CRED})"
+                        echo "✅ تم تسجيل الدخول بنجاح إلى Docker Hub"
                     }
                 }
             }
@@ -42,7 +42,7 @@ pipeline {
 
         stage('Deploy - Pull & Restart') {
             steps {
-                echo "Pulling latest images and restarting services..."
+                echo "جاري سحب أحدث الصور وإعادة تشغيل الخدمات..."
                 sh """
                     docker compose -f ${DOCKER_COMPOSE_FILE} pull
                     docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate
@@ -54,8 +54,8 @@ pipeline {
             steps {
                 sh """
                     docker compose -f ${DOCKER_COMPOSE_FILE} ps
-                    echo "Recent images:"
-                    docker images | grep elhawary22 || echo "No images found"
+                    echo "الصور الحديثة:"
+                    docker images | grep elhawary22 || echo "لم يتم العثور على صور"
                 """
             }
         }
@@ -67,13 +67,10 @@ pipeline {
             sh 'docker system prune -f --volumes || true'
         }
         success {
-            echo '🎉 Build, Push & Deploy completed successfully!'
+            echo '🎉 تم البناء والرفع والنشر بنجاح!'
         }
         failure {
-            echo '❌ Pipeline failed – check the logs above'
-        }
-        unstable {
-            echo '⚠️ Pipeline unstable'
+            echo '❌ فشل الـ Pipeline – راجع السجلات أعلاه'
         }
     }
 }
