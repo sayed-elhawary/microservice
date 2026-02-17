@@ -8,7 +8,7 @@ pipeline {
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED = 'docker-hub-credentials'  // تأكد إن الـ ID ده موجود بالظبط
+        DOCKERHUB_CRED = 'docker-hub-credentials'  // تأكد إن الـ ID ده مطابق تمامًا للي في Credentials
     }
 
     stages {
@@ -20,13 +20,9 @@ pipeline {
 
         stage('Login to Docker Hub') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: env.DOCKERHUB_CRED,
-                    usernameVariable: 'DOCKERHUB_USERNAME',
-                    passwordVariable: 'DOCKERHUB_PASSWORD'
-                )]) {
+                script {
                     docker.withRegistry('https://index.docker.io/v1/', env.DOCKERHUB_CRED) {
-                        echo "Logged in to Docker Hub successfully"
+                        echo "Successfully authenticated with Docker Hub using credential: ${env.DOCKERHUB_CRED}"
                     }
                 }
             }
