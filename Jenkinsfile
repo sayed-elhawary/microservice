@@ -15,6 +15,7 @@ pipeline {
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
         DOCKERHUB_CRED      = 'docker-hub-credentials'   // تأكد إن الـ ID ده موجود بالظبط في Credentials
+        IMAGE_TAG           = "${env.BUILD_NUMBER}"      // اختياري: استخدم رقم البناء بدل latest
     }
 
     stages {
@@ -22,6 +23,7 @@ pipeline {
             steps {
                 checkout scm
                 echo "━━━━━━━━━━━━━━━━━━ تم جلب الكود من GitHub ━━━━━━━━━━━━━━━━━━"
+                sh 'git rev-parse --short HEAD > .git/commit-id'  // حفظ commit hash لو عايز تستخدمه
             }
         }
 
@@ -37,7 +39,7 @@ pipeline {
 
         stage('Build & Push Images') {
             steps {
-                echo "جاري بناء ورفع الصور..."
+                echo "جاري بناء ورفع الصور بتاج ${IMAGE_TAG}..."
                 sh """
                     docker compose -f ${DOCKER_COMPOSE_FILE} build --pull
                     docker compose -f ${DOCKER_COMPOSE_FILE} push
@@ -48,11 +50,13 @@ pipeline {
         stage('Deploy - Pull & Restart') {
             steps {
                 echo "جاري سحب أحدث الصور وإعادة تشغيل الخدمات..."
-                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                    sh """
-                        docker compose -f ${DOCKER_COMPOSE_FILE} pull
-                        docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate
-                    """
+                retry(3) {  // retry 3 مرات لو فشل مؤقت
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        sh """
+                            docker compose -f ${DOCKER_COMPOSE_FILE} pull
+                            docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate
+                        """
+                    }
                 }
             }
         }
@@ -72,9 +76,10 @@ pipeline {
             steps {
                 echo "فحص بسيط للخدمات..."
                 sh """
-                    sleep 10                 # انتظر شوية عشان الخدمات تبدأ
+                    sleep 15                 # انتظر أكتر شوية عشان الخدمات تبدأ
                     curl -s -f http://localhost:3000      || echo "Frontend لسه مش جاهز"
                     curl -s -f http://localhost:3001/health || echo "Auth service check failed"
+                    # أضف المزيد لو عندك endpoints تانية
                 """
             }
         }
@@ -85,24 +90,35 @@ pipeline {
             echo "━━━━━━━━━━━━━━━━━━ تنظيف بعد البناء ━━━━━━━━━━━━━━━━━━"
             sh '''
                 docker logout || true
-                docker system prune -f --volumes || true
+                docker system prune -f --volumes --filter "until=24h" || true
                 docker image prune -f || true
             '''
 
-            // حفظ ملف docker-compose.yaml مع كل بناء (اختياري لكن مفيد للرجوع)
+            // حفظ ملف docker-compose.yaml مع كل بناء
             archiveArtifacts artifacts: 'docker-compose.yaml', allowEmptyArchive: true
+
+            // اختياري: حفظ logs الخدمات لو فشل
+            script {
+                if (currentBuild.currentResult == 'FAILURE' || currentBuild.currentResult == 'UNSTABLE') {
+                    sh 'docker compose -f ${DOCKER_COMPOSE_FILE} logs > deployment-logs.txt || true'
+                    archiveArtifacts artifacts: 'deployment-logs.txt', allowEmptyArchive: true
+                }
+            }
         }
 
         success {
             echo '🎉 تم البناء والرفع والنشر بنجاح كامل!'
+            // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} succeeded! 🚀"
         }
 
         unstable {
             echo '⚠️ الـ Pipeline نجح جزئيًا (ربما مشكلة في الـ deploy أو الـ health check)'
+            // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} unstable! ⚠️ Check logs."
         }
 
         failure {
             echo '❌ فشل الـ Pipeline – راجع السجلات أعلاه بعناية'
+            // slackSend channel: '#deployments', message: "Build #${env.BUILD_NUMBER} FAILED! ❌ Check Jenkins."
         }
     }
 }
