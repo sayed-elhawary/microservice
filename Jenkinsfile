@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     triggers {
-        githubPush()
-        pollSCM('H/5 * * * *')
+        githubPush()                    // webhook من GitHub
+        pollSCM('H/5 * * * *')          // احتياطي كل ~5 دقايق
     }
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED = 'docker-hub-credentials'  // تأكد إن الـ ID ده مطابق تمامًا للي في Credentials
+        DOCKERHUB_CRED      = 'docker-hub-credentials'   // غيّر لو الـ ID مختلف
     }
 
     stages {
@@ -19,10 +19,13 @@ pipeline {
         }
 
         stage('Login to Docker Hub') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
             steps {
                 script {
                     docker.withRegistry('https://index.docker.io/v1/', env.DOCKERHUB_CRED) {
-                        echo "Successfully authenticated with Docker Hub using credential: ${env.DOCKERHUB_CRED}"
+                        echo "✅ Successfully authenticated with Docker Hub (credential: ${env.DOCKERHUB_CRED})"
                     }
                 }
             }
@@ -39,7 +42,7 @@ pipeline {
 
         stage('Deploy - Pull & Restart') {
             steps {
-                echo "Pulling latest images and redeploying..."
+                echo "Pulling latest images and restarting services..."
                 sh """
                     docker compose -f ${DOCKER_COMPOSE_FILE} pull
                     docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans --force-recreate
@@ -47,9 +50,13 @@ pipeline {
             }
         }
 
-        stage('Verify') {
+        stage('Verify Services') {
             steps {
-                sh "docker compose -f ${DOCKER_COMPOSE_FILE} ps"
+                sh """
+                    docker compose -f ${DOCKER_COMPOSE_FILE} ps
+                    echo "Recent images:"
+                    docker images | grep elhawary22 || echo "No images found"
+                """
             }
         }
     }
@@ -57,13 +64,16 @@ pipeline {
     post {
         always {
             sh 'docker logout || true'
-            sh 'docker system prune -f || true'
+            sh 'docker system prune -f --volumes || true'
         }
         success {
-            echo '✅ Build, Push & Deploy Done!'
+            echo '🎉 Build, Push & Deploy completed successfully!'
         }
         failure {
-            echo '❌ Failed somewhere'
+            echo '❌ Pipeline failed – check the logs above'
+        }
+        unstable {
+            echo '⚠️ Pipeline unstable'
         }
     }
 }
