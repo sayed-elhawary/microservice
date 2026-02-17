@@ -10,14 +10,14 @@ pipeline {
         timeout(time: 45, unit: 'MINUTES')
         timestamps()
         buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5'))
-        disableConcurrentBuilds()  // جلوگیری از تداخل اگر چند push همزمان بیاد
+        disableConcurrentBuilds()
     }
 
     environment {
         DOCKER_COMPOSE_FILE = "${WORKSPACE}/docker-compose.yaml"
-        DOCKERHUB_CRED      = 'docker-hub-credentials'  // حتماً مطمئن شو که این ID در Jenkins درست باشه
-        IMAGE_TAG           = "${env.BUILD_NUMBER}"     // یا "${sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()}"
-        DOCKERHUB_USERNAME  = 'elhawary22'              // ← اسم کاربری خودت (ثابت)
+        DOCKERHUB_CRED      = 'docker-hub-credentials'
+        IMAGE_TAG           = "${env.BUILD_NUMBER}"
+        DOCKERHUB_USERNAME  = 'elhawary22'
     }
 
     stages {
@@ -37,9 +37,9 @@ pipeline {
                     passwordVariable: 'DH_PASS'
                 )]) {
                     sh '''
-                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin
+                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin https://index.docker.io/v1/
                         echo "━━━━━━━━━━━━━━━━━━ تم تسجيل الدخول بنجاح إلى Docker Hub ━━━━━━━━━━━━━━━━━━"
-                        docker info --format '{{json .RegistryConfig.IndexConfigs.docker.io}}' | grep -i auth || echo "No auth info (normal if using token)"
+                        docker info --format '{{json .RegistryConfig.IndexConfigs.docker.io}}' | grep -i auth || echo "تم اللوجن بدون مشاكل"
                     '''
                 }
             }
@@ -54,28 +54,27 @@ pipeline {
             }
         }
 
+        // ── Optional: uncomment to see actual local image names after build ──
+        // stage('Debug: List Built Images') {
+        //     steps {
+        //         sh 'docker images --format "table {{.Repository}}:{{.Tag}}\\t{{.ID}}" | grep -E "${DOCKERHUB_USERNAME}|${IMAGE_TAG}" || echo "No matching images found"'
+        //     }
+        // }
+
         stage('Push Images to Docker Hub') {
+            when { expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' } }
             steps {
-                echo "جاري رفع الصور إلى Docker Hub..."
+                echo "جاري رفع الصور إلى Docker Hub بتاج ${IMAGE_TAG}..."
                 withCredentials([usernamePassword(
                     credentialsId: env.DOCKERHUB_CRED,
                     usernameVariable: 'DH_USER',
                     passwordVariable: 'DH_PASS'
                 )]) {
-                    script {
-                        // قائمة الخدمات التي تحتاج رفع (عدلها حسب docker-compose.yaml بتاعك)
-                        def services = ['frontend', 'product-service', 'display-service', 'auth-service']
-
-                        for (service in services) {
-                            def fullImage = "${env.DOCKERHUB_USERNAME}/${service}:${env.IMAGE_TAG}"
-                            sh """
-                                docker tag ${service}:${env.IMAGE_TAG} ${fullImage}
-                                echo "${DH_PASS}" | docker login -u "${DH_USER}" --password-stdin
-                                docker push ${fullImage}
-                                echo "تم رفع ${fullImage} بنجاح"
-                            """
-                        }
-                    }
+                    sh '''
+                        echo "$DH_PASS" | docker login -u "$DH_USER" --password-stdin https://index.docker.io/v1/
+                        docker compose -f "${DOCKER_COMPOSE_FILE}" push
+                        echo "━━━━━━━━━━━━━━━━━━ تم رفع جميع الصور بنجاح ━━━━━━━━━━━━━━━━━━"
+                    '''
                 }
             }
         }
@@ -111,10 +110,9 @@ pipeline {
                 sh '''
                     sleep 20
                     set +e
-                    curl --max-time 10 -s -f http://localhost:3000/       && echo "Frontend: OK"       || echo "Frontend: FAILED"
-                    curl --max-time 10 -s -f http://localhost:3001/health && echo "Auth: OK"          || echo "Auth: FAILED"
-                    # أضف باقي الخدمات هنا، مثلاً:
-                    # curl --max-time 10 -s -f http://localhost:3002/health || echo "Product: FAILED"
+                    curl --max-time 10 -s -f http://localhost:3000/       && echo "Frontend: OK" || echo "Frontend: FAILED"
+                    curl --max-time 10 -s -f http://localhost:3001/health && echo "Auth: OK"     || echo "Auth: FAILED"
+                    # curl --max-time 10 -s -f http://localhost:3002/...    && echo "Product: OK" || echo "Product: FAILED"
                     set -e
                 '''
             }
@@ -127,7 +125,7 @@ pipeline {
             sh '''
                 docker logout || true
                 docker image prune -f || true
-                docker system prune -f --filter "until=24h" || true   # بدون --volumes هنا عشان ما يمسحش volumes مهمة
+                docker system prune -f --filter "until=24h" || true
             '''
             archiveArtifacts artifacts: 'docker-compose.yaml, deployment-logs.txt', allowEmptyArchive: true
 
@@ -138,7 +136,6 @@ pipeline {
                 }
             }
         }
-
         success  { echo '🎉 تم البناء والرفع والنشر بنجاح كامل!' }
         unstable { echo '⚠️ Pipeline نجح جزئياً – راجع الـ logs' }
         failure  { echo '❌ فشل الـ Pipeline – شوف السجلات بعناية' }
