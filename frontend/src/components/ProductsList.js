@@ -1,15 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import './ProductsList.css'; // ← مهم: أضف هذا الملف (انظر أسفله)
 
 // ────────────────────────────────────────────────
-// تنبيه مهم حول BASE URL للصور
+// BASE URL للصور الثابتة
 // ────────────────────────────────────────────────
-// بما أن REACT_APP_PRODUCT_URL = http://76.13.15.214:3002/api/products
-// فإن STATIC_BASE_URL يجب أن يكون بدون /api/products
-// لذلك نستخدم قيمة منفصلة أو نستخرج الجذر
-
-// الطريقة المفضلة: إضافة متغير جديد في .env
-// REACT_APP_STATIC_URL=http://76.13.15.214:3002
 const STATIC_BASE_URL =
   process.env.REACT_APP_STATIC_URL ||
   process.env.REACT_APP_PRODUCT_URL?.replace(/\/api\/products\/?$/, '') ||
@@ -30,7 +25,7 @@ const ProductsList = () => {
 
         const response = await axios.get(
           `${process.env.REACT_APP_DISPLAY_URL}/products`,
-          { timeout: 10000 } // حماية من التعليق الطويل
+          { timeout: 12000 }
         );
 
         let fetchedProducts = [];
@@ -56,29 +51,19 @@ const ProductsList = () => {
         let errorMessage = 'تعذر تحميل المنتجات، حاول مرة أخرى لاحقًا';
 
         if (err.response) {
-          const { status, data } = err.response;
-          if (status === 404) {
-            errorMessage = 'لم يتم العثور على المنتجات (تحقق من عنوان API)';
-          } else if (status >= 500) {
-            errorMessage = 'حدث خطأ في الخادم، يرجى المحاولة لاحقًا';
-          } else if (data?.error) {
-            errorMessage = data.error;
-          } else {
-            errorMessage = `خطأ ${status}: ${err.message}`;
-          }
+          const { status } = err.response;
+          if (status === 404) errorMessage = 'لم يتم العثور على المنتجات';
+          else if (status >= 500) errorMessage = 'مشكلة في الخادم';
+          else if (err.response.data?.error) errorMessage = err.response.data.error;
         } else if (err.request) {
-          errorMessage = 'لا يمكن الوصول إلى الخادم. تأكد من تشغيل الخدمة.';
+          errorMessage = 'لا يمكن الاتصال بالخادم';
         } else {
           errorMessage = err.message;
         }
 
-        if (isMounted) {
-          setError(errorMessage);
-        }
+        if (isMounted) setError(errorMessage);
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setLoading(false);
       }
     };
 
@@ -89,32 +74,16 @@ const ProductsList = () => {
     };
   }, []);
 
-  // ────────────────────────────────────────────────
-  // حالات العرض
-  // ────────────────────────────────────────────────
-
   if (loading) {
-    return (
-      <div className="loading-container">
-        جاري تحميل المنتجات...
-      </div>
-    );
+    return <div className="loading-container">جاري تحميل المنتجات...</div>;
   }
 
   if (error) {
-    return (
-      <div className="error-message">
-        {error}
-      </div>
-    );
+    return <div className="error-message">{error}</div>;
   }
 
   if (products.length === 0) {
-    return (
-      <div className="no-products-message">
-        لا توجد منتجات متاحة حاليًا
-      </div>
-    );
+    return <div className="no-products-message">لا توجد منتجات متاحة حاليًا</div>;
   }
 
   return (
@@ -123,28 +92,19 @@ const ProductsList = () => {
 
       <div className="products-grid">
         {products.map((product) => (
-          <article
-            key={product._id}
-            className="product-card"
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-8px)';
-              e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.14)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
-            }}
-          >
+          <article key={product._id} className="product-card">
             <div className="product-image-wrapper">
               <img
-                src={`${STATIC_BASE_URL}${product.imageUrl?.startsWith('/') ? '' : '/'}${product.imageUrl || ''}`}
+                src={`${STATIC_BASE_URL}${
+                  product.imageUrl?.startsWith('/') ? '' : '/'
+                }${product.imageUrl || ''}`}
                 alt={product.name || 'صورة المنتج'}
                 loading="lazy"
+                className="product-image"
                 onError={(e) => {
-                  e.target.src = 'https://via.placeholder.com/320x240?text=غير+متوفرة';
+                  e.target.src = 'https://via.placeholder.com/400x300?text=غير+متوفرة';
                   e.target.alt = 'صورة غير متاحة';
                 }}
-                className="product-image"
               />
             </div>
 
@@ -156,20 +116,25 @@ const ProductsList = () => {
               </div>
 
               <p className="product-description">
-                {product.description || 'لا يوجد وصف'}
+                {product.description || 'لا يوجد وصف متاح'}
               </p>
 
               <div className="product-meta">
-                <small>
+                <small className="added-by">
                   أضيف بواسطة:{' '}
                   {product.createdBy?.username ||
                     product.createdBy?.name ||
                     product.createdBy ||
                     'مستخدم'}
                 </small>
+
                 {product.createdAt && (
                   <small className="product-date">
-                    {new Date(product.createdAt).toLocaleDateString('ar-EG')}
+                    {new Date(product.createdAt).toLocaleDateString('ar-EG', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
                   </small>
                 )}
               </div>
