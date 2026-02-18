@@ -1,0 +1,124 @@
+.products-page {
+  padding: 1.5rem 1rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.page-title {
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #222;
+  font-size: 2.2rem;
+}
+
+.products-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1.5rem 1.2rem;
+}
+
+.product-card {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.product-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+}
+
+.product-image-wrapper {
+  position: relative;
+  width: 100%;
+  padding-top: 75%; /* نسبة 4:3 – غيّرها إلى 100% لو عايز مربع */
+  overflow: hidden;
+  background: #f8f9fa;
+}
+
+.product-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transition: transform 0.35s ease;
+}
+
+.product-card:hover .product-image {
+  transform: scale(1.04);
+}
+
+.product-info {
+  padding: 1.1rem 1.2rem;
+}
+
+.product-name {
+  font-size: 1.22rem;
+  margin: 0 0 0.5rem;
+  color: #1a1a1a;
+  line-height: 1.35;
+}
+
+.product-price {
+  font-size: 1.38rem;
+  font-weight: 700;
+  color: #c41e3b;
+  margin: 0.35rem 0 0.7rem;
+}
+
+.product-description {
+  font-size: 0.94rem;
+  color: #555;
+  line-height: 1.48;
+  margin-bottom: 0.9rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.product-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.84rem;
+  color: #666;
+  margin-top: 0.6rem;
+}
+
+.product-date {
+  color: #888;
+}
+
+/* ────────────────────────────────────────────────
+   Responsive
+───────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .products-grid {
+    grid-template-columns: 1fr;
+    gap: 1.3rem;
+  }
+
+  .page-title {
+    font-size: 1.9rem;
+  }
+
+  .product-name {
+    font-size: 1.18rem;
+  }
+
+  .product-price {
+    font-size: 1.32rem;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 900px) {
+  .products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+}
